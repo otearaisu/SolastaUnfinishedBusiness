@@ -1330,8 +1330,8 @@ public sealed class PathOfTheWildMagic : AbstractSubclass
                     .SetDurationData(DurationType.Round)
                     .SetEffectForms(EffectFormBuilder.ConditionForm(ConditionDefinitions.ConditionDummy))
                     .Build())
-            .AddCustomSubFeatures(new UnstableBackslashHandler(wildSurgeHandler))
             .AddToDB();
+        powerUnstableBackslash.AddCustomSubFeatures(new UnstableBackslashHandler(powerUnstableBackslash, wildSurgeHandler));
 
         var conditionUnstableBacklash = ConditionDefinitionBuilder
             .Create($"Condition{Name}UnstableBacklash")
@@ -1363,7 +1363,7 @@ public sealed class PathOfTheWildMagic : AbstractSubclass
         return featureUnstableBacklash;
     }
 
-    private sealed class UnstableBackslashHandler(WildSurgeHandler wildSurgeHandler)
+    private sealed class UnstableBackslashHandler(FeatureDefinitionPower power, WildSurgeHandler wildSurgeHandler)
         : IMagicEffectFinishedOnMe, IPhysicalAttackFinishedOnMe, IPowerOrSpellFinishedByMe
     {
         private const string TagUnstableBacklash = "UnstableBacklash";
@@ -1374,14 +1374,38 @@ public sealed class PathOfTheWildMagic : AbstractSubclass
             GameLocationCharacter defender,
             List<GameLocationCharacter> targets)
         {
+            yield return HandleUnstableBacklashReactionForNonDamagingEffect(action, attacker, defender);
             if (!defender.UsedSpecialFeatures.ContainsKey(TagUnstableBacklash))
             {
                 yield break;
             }
-
             defender.UsedSpecialFeatures.Remove(TagUnstableBacklash);
 
             yield return wildSurgeHandler.HandleWildSurge(defender, attacker);
+        }
+
+        private IEnumerator HandleUnstableBacklashReactionForNonDamagingEffect(
+            CharacterActionMagicEffect action,
+            GameLocationCharacter attacker,
+            GameLocationCharacter defender)
+        {
+            var effectDescription = action.actionParams?.RulesetEffect?.EffectDescription;
+            if (!defender.IsReactionAvailable()
+                || effectDescription == null
+                || effectDescription.RangeType == RangeType.MeleeHit
+                || effectDescription.RangeType == RangeType.RangeHit
+                || effectDescription.EffectForms.Count == 0
+                || effectDescription.FindFirstDamageForm() != null
+                || !effectDescription.HasSavingThrow
+                || action.SaveOutcome == RollOutcome.Success 
+                || action.SaveOutcome == RollOutcome.CriticalSuccess
+                || effectDescription.TargetType == TargetType.Self)
+            {
+                yield break;
+            }
+            var usablePower = PowerProvider.Get(power, defender.RulesetCharacter);
+            var battleManager = ServiceRepository.GetService<IGameLocationBattleService>() as GameLocationBattleManager;
+            yield return battleManager.PrepareAndReactWithPowerReaction(defender, attacker, attacker, usablePower);
         }
 
         public IEnumerator OnPhysicalAttackFinishedOnMe(
