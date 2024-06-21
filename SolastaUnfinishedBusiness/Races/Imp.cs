@@ -583,7 +583,8 @@ internal static class RaceImpBuilder
 
     private class DrawInspirationAlterOutcome(FeatureDefinitionPower powerImpBadlandDrawInspiration) :
         ITryAlterOutcomeAttack,
-        ITryAlterOutcomeSavingThrow
+        ITryAlterOutcomeSavingThrow,
+        ITryAlterOutcomeAttributeCheck
     {
         private const int InspirationValue = 3;
 
@@ -683,6 +684,49 @@ internal static class RaceImpBuilder
             action.RolledSaveThrow = true;
             action.SaveOutcomeDelta = 0;
             action.SaveOutcome = RollOutcome.Success;
+        }
+
+        public IEnumerator OnTryAlterAttributeCheck(GameLocationBattleManager battleManager,
+            AbilityCheckData abilityCheckData,
+            GameLocationCharacter defender,
+            GameLocationCharacter helper,
+            ActionModifier abilityCheckModifier)
+        {
+            var rulesetHelper = helper.RulesetCharacter;
+
+            if (abilityCheckData.AbilityCheckRollOutcome is not (RollOutcome.Failure or RollOutcome.CriticalFailure) ||
+                helper != defender ||
+                abilityCheckData.AbilityCheckSuccessDelta < -InspirationValue ||
+                rulesetHelper.GetRemainingPowerUses(powerImpBadlandDrawInspiration) == 0)
+            {
+                yield break;
+            }
+            var actionService = ServiceRepository.GetService<IGameLocationActionService>();
+            var implementationManager =
+                ServiceRepository.GetService<IRulesetImplementationService>() as RulesetImplementationManager;
+
+            var usablePower = PowerProvider.Get(powerImpBadlandDrawInspiration, rulesetHelper);
+            var actionParams = new CharacterActionParams(helper, ActionDefinitions.Id.SpendPower)
+            {
+                StringParameter = "DrawInspiration",
+                RulesetEffect = implementationManager
+                    .MyInstantiateEffectPower(rulesetHelper, usablePower, false),
+                UsablePower = usablePower
+            };
+            var count = actionService.PendingReactionRequestGroups.Count;
+
+            actionService.ReactToSpendPower(actionParams);
+
+            yield return battleManager.WaitForReactions(helper, actionService, count);
+
+            if (!actionParams.ReactionValidated)
+            {
+                yield break;
+            }
+
+            abilityCheckData.AbilityCheckSuccessDelta += InspirationValue;
+            abilityCheckData.AbilityCheckRollOutcome = RollOutcome.Success;
+            abilityCheckData.AbilityCheckRoll += InspirationValue;
         }
     }
 
